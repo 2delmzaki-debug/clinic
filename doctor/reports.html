@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title data-i18n="reports">التقارير والإحصائيات</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  .bar-row{display:grid; grid-template-columns:140px 1fr 42px; align-items:center; gap:10px; margin-bottom:12px;}
+  .bar-track{background:var(--color-primary-soft); border-radius:6px; height:14px; overflow:hidden;}
+  .bar-fill{background:var(--color-primary); height:100%; border-radius:6px; transition:width .4s ease;}
+  .bar-fill.accent{background:var(--color-accent);}
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <div></div>
+      <div class="flex gap-12">
+        <button class="lang-toggle">English</button>
+        <div class="user-chip">
+          <div class="avatar" id="avatarLetter">?</div>
+          <span id="userName" class="muted"></span>
+        </div>
+      </div>
+    </div>
+    <div class="content">
+      <div class="page-head"><h1 data-i18n="reports">التقارير والإحصائيات</h1></div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-num" id="statPatients">—</div><div class="stat-label" data-i18n="total_patients">إجمالي المرضى</div></div>
+        <div class="stat-card"><div class="stat-num" id="statAppts">—</div><div class="stat-label" data-i18n="appointments">المواعيد</div></div>
+        <div class="stat-card"><div class="stat-num" id="statLabs">—</div><div class="stat-label" data-i18n="total_labs">تحاليل مسجلة</div></div>
+        <div class="stat-card"><div class="stat-num" id="statRx">—</div><div class="stat-label" data-i18n="prescriptions">الوصفات الطبية</div></div>
+      </div>
+
+      <div class="card">
+        <h3 data-i18n="appointments">المواعيد حسب الحالة</h3>
+        <div id="statusChart"></div>
+      </div>
+
+      <div class="card">
+        <h3 data-i18n="lab_results">أكثر التحاليل طلباً</h3>
+        <div id="labsChart"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/i18n.js"></script>
+<script src="../assets/js/supabaseClient.js"></script>
+<script src="../assets/js/auth.js"></script>
+<script src="../assets/js/common.js"></script>
+<script src="../assets/js/sidebar.js"></script>
+<script>
+function drawBars(containerId, entries, accent=false) {
+  const max = Math.max(1, ...entries.map(e => e.value));
+  document.getElementById(containerId).innerHTML = entries.map(e => `
+    <div class="bar-row">
+      <div>${escapeHtml(e.label)}</div>
+      <div class="bar-track"><div class="bar-fill ${accent?'accent':''}" style="width:${(e.value/max*100).toFixed(0)}%"></div></div>
+      <div class="mono">${e.value}</div>
+    </div>`).join('') || `<p class="empty-state" data-i18n="no_data">${t('no_data')}</p>`;
+}
+
+(async function () {
+  const profile = await requireRole('doctor');
+  if (!profile) return;
+  renderSidebar('reports', profile);
+  document.getElementById('userName').textContent = profile.full_name;
+  document.getElementById('avatarLetter').textContent = (profile.full_name || '?').trim()[0];
+
+  const [{count: pCount}, {count: rxCount}, {data: appts}, {data: labs}] = await Promise.all([
+    supabase.from('patients').select('*', {count:'exact', head:true}),
+    supabase.from('prescriptions').select('*', {count:'exact', head:true}),
+    supabase.from('appointments').select('status'),
+    supabase.from('lab_results').select('test_name')
+  ]);
+
+  document.getElementById('statPatients').textContent = pCount ?? 0;
+  document.getElementById('statRx').textContent = rxCount ?? 0;
+  document.getElementById('statAppts').textContent = (appts||[]).length;
+  document.getElementById('statLabs').textContent = (labs||[]).length;
+
+  const statusCounts = { pending:0, confirmed:0, completed:0, cancelled:0 };
+  (appts||[]).forEach(a => { if(statusCounts[a.status] !== undefined) statusCounts[a.status]++; });
+  drawBars('statusChart', Object.entries(statusCounts).map(([k,v]) => ({label:t(k), value:v})));
+
+  const testCounts = {};
+  (labs||[]).forEach(l => { testCounts[l.test_name] = (testCounts[l.test_name]||0) + 1; });
+  const topTests = Object.entries(testCounts).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([k,v]) => ({label:k, value:v}));
+  drawBars('labsChart', topTests, true);
+})();
+</script>
+</body>
+</html>

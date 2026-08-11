@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title data-i18n="dashboard">لوحة التحكم</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <div></div>
+      <div class="flex gap-12">
+        <button class="lang-toggle">English</button>
+        <div class="user-chip">
+          <div class="avatar" id="avatarLetter">?</div>
+          <span id="userName" class="muted"></span>
+        </div>
+      </div>
+    </div>
+    <div class="content">
+      <div class="page-head">
+        <h1 data-i18n="dashboard">لوحة التحكم</h1>
+      </div>
+
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-num" id="statPatients">—</div>
+          <div class="stat-label" data-i18n="total_patients">إجمالي المرضى</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" id="statToday">—</div>
+          <div class="stat-label" data-i18n="today_appointments">مواعيد اليوم</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" id="statPending">—</div>
+          <div class="stat-label" data-i18n="pending_appointments">بانتظار التأكيد</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" id="statLabs">—</div>
+          <div class="stat-label" data-i18n="total_labs">تحاليل مسجلة</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 data-i18n="today_appointments">مواعيد اليوم</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th data-i18n="time">الوقت</th>
+                <th data-i18n="patients">المريض</th>
+                <th data-i18n="reason">سبب الزيارة</th>
+                <th data-i18n="status">الحالة</th>
+              </tr>
+            </thead>
+            <tbody id="todayTable"></tbody>
+          </table>
+          <div class="empty-state hidden" id="emptyToday" data-i18n="no_data">لا توجد بيانات لعرضها بعد</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/i18n.js"></script>
+<script src="../assets/js/supabaseClient.js"></script>
+<script src="../assets/js/auth.js"></script>
+<script src="../assets/js/common.js"></script>
+<script src="../assets/js/sidebar.js"></script>
+<script>
+(async function(){
+  const profile = await requireRole('doctor');
+  if(!profile) return;
+  renderSidebar('dashboard', profile);
+
+  const [{count: patientsCount}, {count: labsCount}] = await Promise.all([
+    supabase.from('patients').select('*', {count:'exact', head:true}),
+    supabase.from('lab_results').select('*', {count:'exact', head:true})
+  ]);
+  document.getElementById('statPatients').textContent = patientsCount ?? 0;
+  document.getElementById('statLabs').textContent = labsCount ?? 0;
+
+  const todayStr = new Date().toISOString().slice(0,10);
+  const { data: todayAppts } = await supabase
+    .from('appointments')
+    .select('*, patients(full_name)')
+    .eq('appointment_date', todayStr)
+    .order('appointment_time');
+
+  const { count: pendingCount } = await supabase
+    .from('appointments').select('*', {count:'exact', head:true}).eq('status','pending');
+  document.getElementById('statPending').textContent = pendingCount ?? 0;
+  document.getElementById('statToday').textContent = (todayAppts || []).length;
+
+  const tbody = document.getElementById('todayTable');
+  if(!todayAppts || todayAppts.length === 0){
+    document.getElementById('emptyToday').classList.remove('hidden');
+  } else {
+    tbody.innerHTML = todayAppts.map(a => `
+      <tr>
+        <td class="mono">${a.appointment_time?.slice(0,5) || ''}</td>
+        <td>${escapeHtml(a.patients?.full_name || '—')}</td>
+        <td>${escapeHtml(a.reason || '—')}</td>
+        <td>${statusBadge(a.status)}</td>
+      </tr>`).join('');
+  }
+
+  document.getElementById('userName').textContent = profile.full_name;
+  document.getElementById('avatarLetter').textContent = (profile.full_name || '?').trim()[0];
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title data-i18n="appointments">المواعيد</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <div></div>
+      <div class="flex gap-12">
+        <button class="lang-toggle">English</button>
+        <div class="user-chip">
+          <div class="avatar" id="avatarLetter">?</div>
+          <span id="userName" class="muted"></span>
+        </div>
+      </div>
+    </div>
+    <div class="content">
+      <div class="page-head"><h1 data-i18n="appointments">المواعيد</h1></div>
+
+      <div class="card">
+        <div class="flex gap-12" style="margin-bottom:16px; flex-wrap:wrap;">
+          <input type="date" id="filterDate" style="max-width:180px;">
+          <select id="filterStatus" style="max-width:180px;">
+            <option value="" data-i18n="status">الحالة</option>
+            <option value="pending" data-i18n="pending">بانتظار التأكيد</option>
+            <option value="confirmed" data-i18n="confirmed">مؤكد</option>
+            <option value="completed" data-i18n="completed">منتهي</option>
+            <option value="cancelled" data-i18n="cancelled">ملغى</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" id="clearFilters" data-i18n="cancel">إلغاء</button>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr>
+            <th data-i18n="date">التاريخ</th><th data-i18n="time">الوقت</th><th data-i18n="patients">المريض</th>
+            <th data-i18n="reason">سبب الزيارة</th><th data-i18n="status">الحالة</th><th data-i18n="actions">إجراءات</th>
+          </tr></thead><tbody id="apptTable"></tbody></table>
+          <div class="empty-state hidden" id="emptyState" data-i18n="no_data">لا توجد بيانات لعرضها بعد</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/i18n.js"></script>
+<script src="../assets/js/supabaseClient.js"></script>
+<script src="../assets/js/auth.js"></script>
+<script src="../assets/js/common.js"></script>
+<script src="../assets/js/sidebar.js"></script>
+<script>
+let allAppts = [];
+
+function render(list) {
+  document.getElementById('emptyState').classList.toggle('hidden', list.length > 0);
+  document.getElementById('apptTable').innerHTML = list.map(a => `
+    <tr>
+      <td>${formatDate(a.appointment_date)}</td>
+      <td class="mono">${a.appointment_time?.slice(0,5)||''}</td>
+      <td><a href="patient.html?id=${a.patient_id}">${escapeHtml(a.patients?.full_name || '—')}</a></td>
+      <td>${escapeHtml(a.reason || '—')}</td>
+      <td>${statusBadge(a.status)}</td>
+      <td>
+        <select onchange="updateStatus('${a.id}', this.value)" style="width:auto; padding:6px 10px; font-size:12.5px;">
+          ${['pending','confirmed','completed','cancelled'].map(s => `<option value="${s}" ${a.status===s?'selected':''}>${t(s)}</option>`).join('')}
+        </select>
+      </td>
+    </tr>`).join('');
+  applyLang();
+}
+
+async function updateStatus(id, status) {
+  const { error } = await supabase.from('appointments').update({ status }).eq('id', id);
+  if (error) { showToast(error.message, 'error'); return; }
+  showToast(t('saved_successfully'));
+  loadAppts();
+}
+
+function applyFilters() {
+  const date = document.getElementById('filterDate').value;
+  const status = document.getElementById('filterStatus').value;
+  let list = allAppts;
+  if (date) list = list.filter(a => a.appointment_date === date);
+  if (status) list = list.filter(a => a.status === status);
+  render(list);
+}
+document.getElementById('filterDate').addEventListener('change', applyFilters);
+document.getElementById('filterStatus').addEventListener('change', applyFilters);
+document.getElementById('clearFilters').addEventListener('click', () => {
+  document.getElementById('filterDate').value = '';
+  document.getElementById('filterStatus').value = '';
+  render(allAppts);
+});
+
+async function loadAppts() {
+  const { data, error } = await supabase.from('appointments')
+    .select('*, patients(full_name)')
+    .order('appointment_date', { ascending: false })
+    .order('appointment_time', { ascending: true });
+  if (error) { showToast(error.message, 'error'); return; }
+  allAppts = data || [];
+  applyFilters();
+}
+
+(async function () {
+  const profile = await requireRole('doctor');
+  if (!profile) return;
+  renderSidebar('appointments', profile);
+  document.getElementById('userName').textContent = profile.full_name;
+  document.getElementById('avatarLetter').textContent = (profile.full_name || '?').trim()[0];
+  loadAppts();
+})();
+</script>
+</body>
+</html>

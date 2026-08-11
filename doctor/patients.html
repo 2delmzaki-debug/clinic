@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title data-i18n="patients">المرضى</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <div></div>
+      <div class="flex gap-12">
+        <button class="lang-toggle">English</button>
+        <div class="user-chip">
+          <div class="avatar" id="avatarLetter">?</div>
+          <span id="userName" class="muted"></span>
+        </div>
+      </div>
+    </div>
+    <div class="content">
+      <div class="page-head">
+        <h1 data-i18n="patients">المرضى</h1>
+        <button class="btn btn-accent" id="addPatientBtn">+ <span data-i18n="add_patient">إضافة مريض</span></button>
+      </div>
+
+      <div class="card">
+        <input type="text" id="searchInput" data-i18n-placeholder="search_patients" placeholder="بحث عن مريض..." style="max-width:320px; margin-bottom:16px;">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th data-i18n="full_name">الاسم</th>
+                <th data-i18n="gender">الجنس</th>
+                <th data-i18n="phone">الهاتف</th>
+                <th data-i18n="chronic_diseases">الأمراض المزمنة</th>
+                <th data-i18n="actions">إجراءات</th>
+              </tr>
+            </thead>
+            <tbody id="patientsTable"></tbody>
+          </table>
+          <div class="empty-state hidden" id="emptyState" data-i18n="no_data">لا توجد بيانات لعرضها بعد</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/i18n.js"></script>
+<script src="../assets/js/supabaseClient.js"></script>
+<script src="../assets/js/auth.js"></script>
+<script src="../assets/js/common.js"></script>
+<script src="../assets/js/sidebar.js"></script>
+<script>
+let allPatients = [];
+
+function patientFormHtml(p = {}) {
+  return `
+    <h3>${p.id ? t('edit') : t('add_patient')}</h3>
+    <form id="patientForm">
+      <div class="field"><label data-i18n="full_name">الاسم الكامل</label>
+        <input type="text" id="pFullName" required value="${escapeHtml(p.full_name||'')}"></div>
+      <div class="field-row">
+        <div class="field"><label data-i18n="gender">الجنس</label>
+          <select id="pGender">
+            <option value="male" ${p.gender==='male'?'selected':''} data-i18n="male">ذكر</option>
+            <option value="female" ${p.gender==='female'?'selected':''} data-i18n="female">أنثى</option>
+          </select></div>
+        <div class="field"><label data-i18n="birth_date">تاريخ الميلاد</label>
+          <input type="date" id="pBirthDate" value="${p.birth_date||''}"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label data-i18n="phone">رقم الهاتف</label>
+          <input type="tel" id="pPhone" value="${escapeHtml(p.phone||'')}"></div>
+        <div class="field"><label data-i18n="address">العنوان</label>
+          <input type="text" id="pAddress" value="${escapeHtml(p.address||'')}"></div>
+      </div>
+      <div class="field"><label data-i18n="chronic_diseases">الأمراض المزمنة</label>
+        <textarea id="pChronic" rows="2">${escapeHtml(p.chronic_diseases||'')}</textarea></div>
+      <div class="field"><label data-i18n="family_history">التاريخ المرضي العائلي</label>
+        <textarea id="pFamily" rows="2">${escapeHtml(p.family_history||'')}</textarea></div>
+      <div class="field"><label data-i18n="allergies">الحساسية من أدوية</label>
+        <input type="text" id="pAllergies" value="${escapeHtml(p.allergies||'')}"></div>
+      <div class="field"><label data-i18n="notes">ملاحظات</label>
+        <textarea id="pNotes" rows="2">${escapeHtml(p.notes||'')}</textarea></div>
+      <div class="flex gap-12" style="justify-content:flex-end; margin-top:10px;">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()" data-i18n="cancel">إلغاء</button>
+        <button type="submit" class="btn btn-primary" data-i18n="save">حفظ</button>
+      </div>
+    </form>`;
+}
+
+function openPatientForm(patient) {
+  openModal(patientFormHtml(patient || {}));
+  document.getElementById('patientForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const payload = {
+      full_name: document.getElementById('pFullName').value.trim(),
+      gender: document.getElementById('pGender').value,
+      birth_date: document.getElementById('pBirthDate').value || null,
+      phone: document.getElementById('pPhone').value.trim(),
+      address: document.getElementById('pAddress').value.trim(),
+      chronic_diseases: document.getElementById('pChronic').value.trim(),
+      family_history: document.getElementById('pFamily').value.trim(),
+      allergies: document.getElementById('pAllergies').value.trim(),
+      notes: document.getElementById('pNotes').value.trim(),
+    };
+    try {
+      if (patient && patient.id) {
+        const { error } = await supabase.from('patients').update(payload).eq('id', patient.id);
+        if (error) throw error;
+      } else {
+        const { data: { session } } = await supabase.auth.getSession();
+        payload.created_by = session.user.id;
+        const { error } = await supabase.from('patients').insert(payload);
+        if (error) throw error;
+      }
+      showToast(t('saved_successfully'));
+      closeModal();
+      loadPatients();
+    } catch (err) {
+      showToast(err.message || t('error_occurred'), 'error');
+    }
+  });
+}
+
+async function deletePatient(id) {
+  if (!confirm(t('delete') + '?')) return;
+  const { error } = await supabase.from('patients').delete().eq('id', id);
+  if (error) { showToast(err?.message || t('error_occurred'), 'error'); return; }
+  showToast(t('deleted_successfully'));
+  loadPatients();
+}
+
+function renderPatientsTable(list) {
+  const tbody = document.getElementById('patientsTable');
+  document.getElementById('emptyState').classList.toggle('hidden', list.length > 0);
+  tbody.innerHTML = list.map(p => `
+    <tr>
+      <td><a href="patient.html?id=${p.id}" style="font-weight:700;">${escapeHtml(p.full_name)}</a></td>
+      <td>${p.gender ? t(p.gender) : '—'}</td>
+      <td class="mono">${escapeHtml(p.phone || '—')}</td>
+      <td>${escapeHtml(p.chronic_diseases || '—')}</td>
+      <td>
+        <div class="flex gap-8">
+          <a href="patient.html?id=${p.id}" class="btn btn-ghost btn-sm" data-i18n="view">عرض</a>
+          <button class="btn btn-ghost btn-sm" onclick='openPatientForm(${JSON.stringify(p).replace(/'/g,"&#39;")})' data-i18n="edit">تعديل</button>
+          <button class="btn btn-danger btn-sm" onclick="deletePatient('${p.id}')" data-i18n="delete">حذف</button>
+        </div>
+      </td>
+    </tr>`).join('');
+  applyLang();
+}
+
+async function loadPatients() {
+  const { data, error } = await supabase.from('patients').select('*').order('created_at', { ascending: false });
+  if (error) { showToast(error.message, 'error'); return; }
+  allPatients = data || [];
+  renderPatientsTable(allPatients);
+}
+
+document.getElementById('searchInput').addEventListener('input', (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  renderPatientsTable(allPatients.filter(p =>
+    (p.full_name || '').toLowerCase().includes(q) || (p.phone || '').includes(q)));
+});
+document.getElementById('addPatientBtn').addEventListener('click', () => openPatientForm());
+
+(async function () {
+  const profile = await requireRole('doctor');
+  if (!profile) return;
+  renderSidebar('patients', profile);
+  document.getElementById('userName').textContent = profile.full_name;
+  document.getElementById('avatarLetter').textContent = (profile.full_name || '?').trim()[0];
+  loadPatients();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title data-i18n="my_file">ملفي الطبي</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <div class="flex gap-8">
+        <strong data-i18n="welcome">أهلاً بك</strong><span id="userName" class="muted"></span>
+      </div>
+      <div class="flex gap-12">
+        <button class="lang-toggle">English</button>
+        <div class="avatar" id="avatarLetter">?</div>
+      </div>
+    </div>
+    <div class="content">
+
+      <div id="panel-my_file">
+        <div class="page-head"><h1 data-i18n="my_file">ملفي الطبي</h1>
+          <button class="btn btn-ghost btn-sm" id="editFileBtn" data-i18n="edit">تعديل</button></div>
+        <div class="card" id="fileCard"></div>
+      </div>
+
+      <div id="panel-book_appointment" class="hidden">
+        <div class="page-head"><h1 data-i18n="book_appointment">حجز موعد</h1></div>
+        <div class="card" style="max-width:480px;">
+          <form id="bookForm">
+            <div class="field"><label data-i18n="date">التاريخ</label><input type="date" id="bDate" required></div>
+            <div class="field"><label data-i18n="time">الوقت</label><input type="time" id="bTime" required></div>
+            <div class="field"><label data-i18n="reason">سبب الزيارة</label><textarea id="bReason" rows="3"></textarea></div>
+            <button type="submit" class="btn btn-primary btn-block" data-i18n="book_appointment">حجز موعد</button>
+          </form>
+        </div>
+        <h3 style="margin-top:24px;" data-i18n="my_appointments">مواعيدي</h3>
+        <div class="card"><div class="table-wrap">
+          <table><thead><tr><th data-i18n="date">التاريخ</th><th data-i18n="time">الوقت</th><th data-i18n="reason">سبب الزيارة</th><th data-i18n="status">الحالة</th><th data-i18n="actions">إجراءات</th></tr></thead>
+          <tbody id="apptTable"></tbody></table>
+          <div class="empty-state hidden" id="emptyAppt" data-i18n="no_data">لا توجد بيانات لعرضها بعد</div>
+        </div></div>
+      </div>
+
+      <div id="panel-my_labs" class="hidden">
+        <div class="page-head"><h1 data-i18n="my_labs">تحاليلي</h1></div>
+        <div class="card"><div class="table-wrap">
+          <table><thead><tr><th data-i18n="test_name">اسم التحليل</th><th data-i18n="test_value">القيمة</th><th data-i18n="reference_range">المعدل الطبيعي</th><th data-i18n="test_date">تاريخ التحليل</th></tr></thead>
+          <tbody id="labTable"></tbody></table>
+          <div class="empty-state hidden" id="emptyLab" data-i18n="no_data">لا توجد بيانات لعرضها بعد</div>
+        </div></div>
+      </div>
+
+      <div id="panel-my_prescriptions" class="hidden">
+        <div class="page-head"><h1 data-i18n="my_prescriptions">وصفاتي</h1></div>
+        <div id="rxList"></div>
+        <div class="empty-state hidden" id="emptyRx" data-i18n="no_data">لا توجد بيانات لعرضها بعد</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/i18n.js"></script>
+<script src="../assets/js/supabaseClient.js"></script>
+<script src="../assets/js/auth.js"></script>
+<script src="../assets/js/common.js"></script>
+<script src="../assets/js/sidebar.js"></script>
+<script>
+let myPatientRow = null;
+
+document.addEventListener('click', (e) => {
+  const tabBtn = e.target.closest('.js-patient-tab');
+  if (!tabBtn) return;
+  document.querySelectorAll('.js-patient-tab').forEach(b => b.classList.remove('active'));
+  tabBtn.classList.add('active');
+  document.querySelectorAll('[id^="panel-"]').forEach(p => p.classList.add('hidden'));
+  document.getElementById('panel-' + tabBtn.dataset.tab).classList.remove('hidden');
+});
+
+function renderFileCard(p) {
+  document.getElementById('fileCard').innerHTML = `
+    <div class="field-row">
+      <div><label data-i18n="gender">الجنس</label><p>${p.gender ? t(p.gender) : '—'}</p></div>
+      <div><label data-i18n="birth_date">تاريخ الميلاد</label><p>${formatDate(p.birth_date)}</p></div>
+    </div>
+    <div class="field-row">
+      <div><label data-i18n="phone">رقم الهاتف</label><p class="mono">${escapeHtml(p.phone||'—')}</p></div>
+      <div><label data-i18n="address">العنوان</label><p>${escapeHtml(p.address||'—')}</p></div>
+    </div>
+    <label data-i18n="chronic_diseases">الأمراض المزمنة</label><p>${escapeHtml(p.chronic_diseases||'—')}</p>
+    <label data-i18n="family_history">التاريخ المرضي العائلي</label><p>${escapeHtml(p.family_history||'—')}</p>
+    <label data-i18n="allergies">الحساسية من أدوية</label><p>${escapeHtml(p.allergies||'—')}</p>`;
+  applyLang();
+}
+
+document.getElementById('editFileBtn').addEventListener('click', () => {
+  const p = myPatientRow || {};
+  openModal(`
+    <h3 data-i18n="edit">تعديل</h3>
+    <form id="editForm">
+      <div class="field-row">
+        <div class="field"><label data-i18n="gender">الجنس</label>
+          <select id="eGender">
+            <option value="male" ${p.gender==='male'?'selected':''} data-i18n="male">ذكر</option>
+            <option value="female" ${p.gender==='female'?'selected':''} data-i18n="female">أنثى</option>
+          </select></div>
+        <div class="field"><label data-i18n="birth_date">تاريخ الميلاد</label><input type="date" id="eBirth" value="${p.birth_date||''}"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label data-i18n="phone">رقم الهاتف</label><input type="tel" id="ePhone" value="${escapeHtml(p.phone||'')}"></div>
+        <div class="field"><label data-i18n="address">العنوان</label><input type="text" id="eAddress" value="${escapeHtml(p.address||'')}"></div>
+      </div>
+      <div class="field"><label data-i18n="chronic_diseases">الأمراض المزمنة</label><textarea id="eChronic" rows="2">${escapeHtml(p.chronic_diseases||'')}</textarea></div>
+      <div class="field"><label data-i18n="family_history">التاريخ المرضي العائلي</label><textarea id="eFamily" rows="2">${escapeHtml(p.family_history||'')}</textarea></div>
+      <div class="field"><label data-i18n="allergies">الحساسية من أدوية</label><input type="text" id="eAllergies" value="${escapeHtml(p.allergies||'')}"></div>
+      <div class="flex gap-12" style="justify-content:flex-end; margin-top:10px;">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()" data-i18n="cancel">إلغاء</button>
+        <button type="submit" class="btn btn-primary" data-i18n="save">حفظ</button>
+      </div>
+    </form>`);
+  document.getElementById('editForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const payload = {
+      gender: document.getElementById('eGender').value,
+      birth_date: document.getElementById('eBirth').value || null,
+      phone: document.getElementById('ePhone').value.trim(),
+      address: document.getElementById('eAddress').value.trim(),
+      chronic_diseases: document.getElementById('eChronic').value.trim(),
+      family_history: document.getElementById('eFamily').value.trim(),
+      allergies: document.getElementById('eAllergies').value.trim(),
+    };
+    const { error } = await supabase.from('patients').update(payload).eq('id', myPatientRow.id);
+    if (error) { showToast(error.message, 'error'); return; }
+    showToast(t('saved_successfully')); closeModal();
+    Object.assign(myPatientRow, payload);
+    renderFileCard(myPatientRow);
+  });
+});
+
+async function loadAppointments() {
+  const { data } = await supabase.from('appointments').select('*').eq('patient_id', myPatientRow.id).order('appointment_date', { ascending: false });
+  const list = data || [];
+  document.getElementById('emptyAppt').classList.toggle('hidden', list.length > 0);
+  document.getElementById('apptTable').innerHTML = list.map(a => `
+    <tr>
+      <td>${formatDate(a.appointment_date)}</td>
+      <td class="mono">${a.appointment_time?.slice(0,5)||''}</td>
+      <td>${escapeHtml(a.reason||'—')}</td>
+      <td>${statusBadge(a.status)}</td>
+      <td>${a.status === 'pending' || a.status === 'confirmed' ? `<button class="btn btn-danger btn-sm" onclick="cancelAppt('${a.id}')" data-i18n="cancel">إلغاء</button>` : ''}</td>
+    </tr>`).join('');
+  applyLang();
+}
+async function cancelAppt(id) {
+  const { error } = await supabase.from('appointments').update({ status: 'cancelled' }).eq('id', id);
+  if (error) { showToast(error.message, 'error'); return; }
+  showToast(t('saved_successfully')); loadAppointments();
+}
+document.getElementById('bookForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const { error } = await supabase.from('appointments').insert({
+    patient_id: myPatientRow.id,
+    appointment_date: document.getElementById('bDate').value,
+    appointment_time: document.getElementById('bTime').value,
+    reason: document.getElementById('bReason').value.trim(),
+    status: 'pending'
+  });
+  if (error) { showToast(error.message, 'error'); return; }
+  showToast(t('saved_successfully'));
+  e.target.reset();
+  loadAppointments();
+});
+
+async function loadLabs() {
+  const { data } = await supabase.from('lab_results').select('*').eq('patient_id', myPatientRow.id).order('test_date', { ascending: false });
+  const list = data || [];
+  document.getElementById('emptyLab').classList.toggle('hidden', list.length > 0);
+  document.getElementById('labTable').innerHTML = list.map(l => `
+    <tr>
+      <td>${escapeHtml(l.test_name)}</td>
+      <td>${renderGauge(l.test_value, l.reference_min, l.reference_max)} <span class="muted">${escapeHtml(l.unit||'')}</span></td>
+      <td class="mono">${l.reference_min ?? '—'} – ${l.reference_max ?? '—'}</td>
+      <td>${formatDate(l.test_date)}</td>
+    </tr>`).join('');
+  applyLang();
+}
+
+async function loadPrescriptions() {
+  const { data } = await supabase.from('prescriptions').select('*, prescription_items(*)').eq('patient_id', myPatientRow.id).order('prescription_date', { ascending: false });
+  const list = data || [];
+  document.getElementById('emptyRx').classList.toggle('hidden', list.length > 0);
+  document.getElementById('rxList').innerHTML = list.map(rx => `
+    <div class="card">
+      <strong>${formatDate(rx.prescription_date)}</strong> — ${escapeHtml(rx.diagnosis||'')}
+      <div class="table-wrap" style="margin-top:10px;">
+        <table><thead><tr><th data-i18n="medication">الدواء</th><th data-i18n="dosage">الجرعة</th><th data-i18n="frequency">التكرار</th><th data-i18n="duration">المدة</th></tr></thead>
+        <tbody>${(rx.prescription_items||[]).map(it => `<tr><td>${escapeHtml(it.medication_name)}</td><td>${escapeHtml(it.dosage||'—')}</td><td>${escapeHtml(it.frequency||'—')}</td><td>${escapeHtml(it.duration||'—')}</td></tr>`).join('')}</tbody></table>
+      </div>
+    </div>`).join('');
+  applyLang();
+}
+
+(async function () {
+  const profile = await requireRole('patient');
+  if (!profile) return;
+  renderPatientSidebar('my_file');
+  document.getElementById('bDate').min = new Date().toISOString().slice(0,10);
+  document.getElementById('userName').textContent = profile.full_name;
+  document.getElementById('avatarLetter').textContent = (profile.full_name || '?').trim()[0];
+
+  let { data: p } = await supabase.from('patients').select('*').eq('profile_id', profile.id).single();
+  if (!p) {
+    const { data: created } = await supabase.from('patients').insert({ profile_id: profile.id, full_name: profile.full_name, phone: profile.phone }).select().single();
+    p = created;
+  }
+  myPatientRow = p;
+  renderFileCard(p);
+  loadAppointments();
+  loadLabs();
+  loadPrescriptions();
+})();
+</script>
+</body>
+</html>

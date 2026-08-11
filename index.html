@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>عيادة الغدد الصماء</title>
+<link rel="stylesheet" href="assets/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+<div class="auth-shell">
+  <div class="auth-card">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M8 3v4a4 4 0 0 0 8 0V3M8 3H6a2 2 0 0 0-2 2v3a6 6 0 0 0 6 6v4M16 3h2a2 2 0 0 1 2 2v3a6 6 0 0 1-6 6v4" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </div>
+      <div class="brand-name" data-i18n="clinic_name">عيادة الغدد الصماء</div>
+    </div>
+
+    <div class="card">
+      <div class="tabs" id="roleTabs">
+        <button class="tab-btn active" data-role="patient" data-i18n="login_as_patient">دخول / حجز المرضى</button>
+        <button class="tab-btn" data-role="doctor" data-i18n="login_as_doctor">دخول الطبيب / الموظفين</button>
+      </div>
+
+      <div class="tabs" id="modeTabs" style="background:transparent; border:none; padding:0; margin-bottom:18px;">
+        <button class="tab-btn active" data-mode="login" data-i18n="login" style="background:none; color:var(--color-primary); border-bottom:2px solid var(--color-primary); border-radius:0;">تسجيل الدخول</button>
+        <button class="tab-btn" data-mode="register" data-i18n="register" style="background:none; color:var(--color-text-muted); border-radius:0;">إنشاء حساب</button>
+      </div>
+
+      <form id="authForm">
+        <div class="field hidden" id="fullNameField">
+          <label data-i18n="full_name">الاسم الكامل</label>
+          <input type="text" id="fullName" autocomplete="name">
+        </div>
+        <div class="field hidden" id="phoneField">
+          <label data-i18n="phone">رقم الهاتف</label>
+          <input type="tel" id="phone" autocomplete="tel">
+        </div>
+        <div class="field">
+          <label data-i18n="email">البريد الإلكتروني</label>
+          <input type="email" id="email" required autocomplete="email">
+        </div>
+        <div class="field">
+          <label data-i18n="password">كلمة المرور</label>
+          <input type="password" id="password" required autocomplete="current-password" minlength="6">
+        </div>
+        <button type="submit" class="btn btn-primary btn-block" id="submitBtn" data-i18n="login">تسجيل الدخول</button>
+      </form>
+    </div>
+
+    <p class="muted" style="text-align:center; margin-top:18px; font-size:13px;" data-i18n="national_clinic_desc">
+      منصّة رقمية لمتابعة السكري واضطرابات الغدة الدرقية وهرمونات الجسم
+    </p>
+    <div style="text-align:center;">
+      <button class="lang-toggle">English</button>
+    </div>
+  </div>
+</div>
+
+<script src="assets/js/i18n.js"></script>
+<script src="assets/js/supabaseClient.js"></script>
+<script src="assets/js/auth.js"></script>
+<script src="assets/js/common.js"></script>
+<script>
+let currentRole = 'patient';
+let currentMode = 'login';
+
+document.getElementById('roleTabs').addEventListener('click', (e)=>{
+  const btn = e.target.closest('.tab-btn'); if(!btn) return;
+  document.querySelectorAll('#roleTabs .tab-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  currentRole = btn.dataset.role;
+});
+
+document.getElementById('modeTabs').addEventListener('click', (e)=>{
+  const btn = e.target.closest('.tab-btn'); if(!btn) return;
+  document.querySelectorAll('#modeTabs .tab-btn').forEach(b=>{
+    b.classList.remove('active'); b.style.color='var(--color-text-muted)'; b.style.borderBottom='none';
+  });
+  btn.classList.add('active'); btn.style.color='var(--color-primary)'; btn.style.borderBottom='2px solid var(--color-primary)';
+  currentMode = btn.dataset.mode;
+  const isRegister = currentMode === 'register';
+  document.getElementById('fullNameField').classList.toggle('hidden', !isRegister);
+  document.getElementById('phoneField').classList.toggle('hidden', !isRegister);
+  document.getElementById('submitBtn').textContent = t(isRegister ? 'register' : 'login');
+  document.getElementById('submitBtn').setAttribute('data-i18n', isRegister ? 'register' : 'login');
+});
+
+document.getElementById('authForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+  const submitBtn = document.getElementById('submitBtn');
+  submitBtn.disabled = true;
+  try{
+    if(currentMode === 'register'){
+      const fullName = document.getElementById('fullName').value.trim();
+      const phone = document.getElementById('phone').value.trim();
+      if(!fullName){ showToast(t('fill_required'),'error'); submitBtn.disabled=false; return; }
+      await signUpUser({ email, password, fullName, phone, role: currentRole });
+
+      // إذا سجّل مريض جديد، أنشئ له تلقائياً صف ملف طبي مرتبط بحسابه
+      if(currentRole === 'patient'){
+        const { data:{ session } } = await supabase.auth.getSession();
+        if(session){
+          await supabase.from('patients').insert({
+            profile_id: session.user.id, full_name: fullName, phone
+          });
+        }
+      }
+      showToast(t('saved_successfully'));
+    } else {
+      await signInUser({ email, password });
+    }
+
+    const profile = await getCurrentProfile();
+    if(!profile){ showToast(t('error_occurred'),'error'); submitBtn.disabled=false; return; }
+    window.location.href = profile.role === 'doctor' ? 'doctor/dashboard.html' : 'patient/portal.html';
+  } catch(err){
+    showToast(err.message || t('error_occurred'), 'error');
+  } finally {
+    submitBtn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

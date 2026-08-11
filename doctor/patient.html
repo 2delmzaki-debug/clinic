@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title data-i18n="patient_details">بيانات المريض</title>
+<link rel="stylesheet" href="../assets/css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar"></aside>
+  <div class="main">
+    <div class="topbar">
+      <a href="patients.html" class="btn btn-ghost btn-sm">← <span data-i18n="back">رجوع</span></a>
+      <div class="flex gap-12">
+        <button class="lang-toggle">English</button>
+        <div class="user-chip">
+          <div class="avatar" id="avatarLetter">?</div>
+          <span id="userName" class="muted"></span>
+        </div>
+      </div>
+    </div>
+    <div class="content">
+      <div class="page-head">
+        <div>
+          <h1 id="patientName">—</h1>
+          <p class="muted" id="patientSub"></p>
+        </div>
+      </div>
+
+      <div class="section-tabs" id="sectionTabs">
+        <div class="section-tab active" data-tab="overview" data-i18n="overview">نظرة عامة</div>
+        <div class="section-tab" data-tab="appointments" data-i18n="appointments">المواعيد</div>
+        <div class="section-tab" data-tab="labs" data-i18n="lab_results">نتائج التحاليل</div>
+        <div class="section-tab" data-tab="prescriptions" data-i18n="prescriptions">الوصفات الطبية</div>
+      </div>
+
+      <div id="tab-overview" class="tab-panel card"></div>
+
+      <div id="tab-appointments" class="tab-panel hidden">
+        <div class="page-head"><h3 data-i18n="appointments">المواعيد</h3>
+          <button class="btn btn-accent btn-sm" id="addApptBtn">+ <span data-i18n="new_appointment">موعد جديد</span></button></div>
+        <div class="card"><div class="table-wrap">
+          <table><thead><tr>
+            <th data-i18n="date">التاريخ</th><th data-i18n="time">الوقت</th><th data-i18n="reason">سبب الزيارة</th><th data-i18n="status">الحالة</th><th data-i18n="actions">إجراءات</th>
+          </tr></thead><tbody id="apptTable"></tbody></table>
+          <div class="empty-state hidden" id="emptyAppt" data-i18n="no_data">لا توجد بيانات لعرضها بعد</div>
+        </div></div>
+      </div>
+
+      <div id="tab-labs" class="tab-panel hidden">
+        <div class="page-head"><h3 data-i18n="lab_results">نتائج التحاليل</h3>
+          <button class="btn btn-accent btn-sm" id="addLabBtn">+ <span data-i18n="add_lab_result">إضافة نتيجة تحليل</span></button></div>
+        <div class="card"><div class="table-wrap">
+          <table><thead><tr>
+            <th data-i18n="test_name">اسم التحليل</th><th data-i18n="test_value">القيمة</th><th data-i18n="reference_range">المعدل الطبيعي</th><th data-i18n="test_date">تاريخ التحليل</th><th data-i18n="actions">إجراءات</th>
+          </tr></thead><tbody id="labTable"></tbody></table>
+          <div class="empty-state hidden" id="emptyLab" data-i18n="no_data">لا توجد بيانات لعرضها بعد</div>
+        </div></div>
+      </div>
+
+      <div id="tab-prescriptions" class="tab-panel hidden">
+        <div class="page-head"><h3 data-i18n="prescriptions">الوصفات الطبية</h3>
+          <button class="btn btn-accent btn-sm" id="addRxBtn">+ <span data-i18n="new_prescription">وصفة جديدة</span></button></div>
+        <div id="rxList"></div>
+        <div class="empty-state hidden" id="emptyRx" data-i18n="no_data">لا توجد بيانات لعرضها بعد</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/js/i18n.js"></script>
+<script src="../assets/js/supabaseClient.js"></script>
+<script src="../assets/js/auth.js"></script>
+<script src="../assets/js/common.js"></script>
+<script src="../assets/js/sidebar.js"></script>
+<script>
+const patientId = new URLSearchParams(window.location.search).get('id');
+let currentPatient = null;
+let doctorId = null;
+
+// ---------- تبويبات ----------
+document.getElementById('sectionTabs').addEventListener('click', (e) => {
+  const tab = e.target.closest('.section-tab'); if (!tab) return;
+  document.querySelectorAll('.section-tab').forEach(t => t.classList.remove('active'));
+  tab.classList.add('active');
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+  document.getElementById('tab-' + tab.dataset.tab).classList.remove('hidden');
+});
+
+function renderOverview(p) {
+  document.getElementById('tab-overview').innerHTML = `
+    <div class="field-row">
+      <div><label data-i18n="gender">الجنس</label><p>${p.gender ? t(p.gender) : '—'}</p></div>
+      <div><label data-i18n="birth_date">تاريخ الميلاد</label><p>${formatDate(p.birth_date)} (${calcAge(p.birth_date)})</p></div>
+    </div>
+    <div class="field-row">
+      <div><label data-i18n="phone">رقم الهاتف</label><p class="mono">${escapeHtml(p.phone||'—')}</p></div>
+      <div><label data-i18n="address">العنوان</label><p>${escapeHtml(p.address||'—')}</p></div>
+    </div>
+    <label data-i18n="chronic_diseases">الأمراض المزمنة</label><p>${escapeHtml(p.chronic_diseases||'—')}</p>
+    <label data-i18n="family_history">التاريخ المرضي العائلي</label><p>${escapeHtml(p.family_history||'—')}</p>
+    <label data-i18n="allergies">الحساسية من أدوية</label><p>${escapeHtml(p.allergies||'—')}</p>
+    <label data-i18n="notes">ملاحظات</label><p>${escapeHtml(p.notes||'—')}</p>
+  `;
+  applyLang();
+}
+
+// ---------- المواعيد ----------
+async function loadAppointments() {
+  const { data } = await supabase.from('appointments').select('*').eq('patient_id', patientId).order('appointment_date', { ascending: false });
+  const list = data || [];
+  document.getElementById('emptyAppt').classList.toggle('hidden', list.length > 0);
+  document.getElementById('apptTable').innerHTML = list.map(a => `
+    <tr>
+      <td>${formatDate(a.appointment_date)}</td>
+      <td class="mono">${a.appointment_time?.slice(0,5)||''}</td>
+      <td>${escapeHtml(a.reason||'—')}</td>
+      <td>${statusBadge(a.status)}</td>
+      <td>
+        <select onchange="updateApptStatus('${a.id}', this.value)" style="width:auto; padding:6px 10px; font-size:12.5px;">
+          ${['pending','confirmed','completed','cancelled'].map(s => `<option value="${s}" ${a.status===s?'selected':''}>${t(s)}</option>`).join('')}
+        </select>
+      </td>
+    </tr>`).join('');
+  applyLang();
+}
+async function updateApptStatus(id, status) {
+  const { error } = await supabase.from('appointments').update({ status }).eq('id', id);
+  if (error) { showToast(error.message, 'error'); return; }
+  showToast(t('saved_successfully'));
+  loadAppointments();
+}
+document.getElementById('addApptBtn').addEventListener('click', () => {
+  openModal(`
+    <h3 data-i18n="new_appointment">موعد جديد</h3>
+    <form id="apptForm">
+      <div class="field-row">
+        <div class="field"><label data-i18n="date">التاريخ</label><input type="date" id="aDate" required></div>
+        <div class="field"><label data-i18n="time">الوقت</label><input type="time" id="aTime" required></div>
+      </div>
+      <div class="field"><label data-i18n="reason">سبب الزيارة</label><input type="text" id="aReason"></div>
+      <div class="flex gap-12" style="justify-content:flex-end; margin-top:10px;">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()" data-i18n="cancel">إلغاء</button>
+        <button type="submit" class="btn btn-primary" data-i18n="save">حفظ</button>
+      </div>
+    </form>`);
+  document.getElementById('apptForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const { error } = await supabase.from('appointments').insert({
+      patient_id: patientId, doctor_id: doctorId,
+      appointment_date: document.getElementById('aDate').value,
+      appointment_time: document.getElementById('aTime').value,
+      reason: document.getElementById('aReason').value.trim(),
+      status: 'confirmed'
+    });
+    if (error) { showToast(error.message, 'error'); return; }
+    showToast(t('saved_successfully')); closeModal(); loadAppointments();
+  });
+});
+
+// ---------- التحاليل ----------
+const COMMON_TESTS = ['FBS - سكر صائم','HbA1c - السكر التراكمي','TSH','Free T3','Free T4','Cortisol','Prolactin','LH','FSH','Testosterone','Vitamin D'];
+async function loadLabs() {
+  const { data } = await supabase.from('lab_results').select('*').eq('patient_id', patientId).order('test_date', { ascending: false });
+  const list = data || [];
+  document.getElementById('emptyLab').classList.toggle('hidden', list.length > 0);
+  document.getElementById('labTable').innerHTML = list.map(l => `
+    <tr>
+      <td>${escapeHtml(l.test_name)}</td>
+      <td>${renderGauge(l.test_value, l.reference_min, l.reference_max)} <span class="muted">${escapeHtml(l.unit||'')}</span></td>
+      <td class="mono">${l.reference_min ?? '—'} – ${l.reference_max ?? '—'}</td>
+      <td>${formatDate(l.test_date)}</td>
+      <td><button class="btn btn-danger btn-sm" onclick="deleteLab('${l.id}')" data-i18n="delete">حذف</button></td>
+    </tr>`).join('');
+  applyLang();
+}
+async function deleteLab(id) {
+  if (!confirm(t('delete') + '?')) return;
+  await supabase.from('lab_results').delete().eq('id', id);
+  showToast(t('deleted_successfully')); loadLabs();
+}
+document.getElementById('addLabBtn').addEventListener('click', () => {
+  openModal(`
+    <h3 data-i18n="add_lab_result">إضافة نتيجة تحليل</h3>
+    <form id="labForm">
+      <div class="field"><label data-i18n="test_name">اسم التحليل</label>
+        <input list="testsList" id="lName" required>
+        <datalist id="testsList">${COMMON_TESTS.map(x=>`<option value="${x}">`).join('')}</datalist></div>
+      <div class="field-row">
+        <div class="field"><label data-i18n="test_value">القيمة</label><input type="number" step="any" id="lValue" required></div>
+        <div class="field"><label data-i18n="unit">الوحدة</label><input type="text" id="lUnit" placeholder="mg/dL"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label data-i18n="reference_range">الحد الأدنى</label><input type="number" step="any" id="lMin"></div>
+        <div class="field"><label>&nbsp;</label><input type="number" step="any" id="lMax" placeholder="الحد الأقصى"></div>
+      </div>
+      <div class="field"><label data-i18n="test_date">تاريخ التحليل</label><input type="date" id="lDate" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div class="flex gap-12" style="justify-content:flex-end; margin-top:10px;">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()" data-i18n="cancel">إلغاء</button>
+        <button type="submit" class="btn btn-primary" data-i18n="save">حفظ</button>
+      </div>
+    </form>`);
+  document.getElementById('labForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const { data:{session} } = await supabase.auth.getSession();
+    const { error } = await supabase.from('lab_results').insert({
+      patient_id: patientId,
+      test_name: document.getElementById('lName').value.trim(),
+      test_value: parseFloat(document.getElementById('lValue').value),
+      unit: document.getElementById('lUnit').value.trim(),
+      reference_min: document.getElementById('lMin').value ? parseFloat(document.getElementById('lMin').value) : null,
+      reference_max: document.getElementById('lMax').value ? parseFloat(document.getElementById('lMax').value) : null,
+      test_date: document.getElementById('lDate').value,
+      created_by: session.user.id
+    });
+    if (error) { showToast(error.message, 'error'); return; }
+    showToast(t('saved_successfully')); closeModal(); loadLabs();
+  });
+});
+
+// ---------- الوصفات ----------
+async function loadPrescriptions() {
+  const { data } = await supabase.from('prescriptions').select('*, prescription_items(*)').eq('patient_id', patientId).order('prescription_date', { ascending: false });
+  const list = data || [];
+  document.getElementById('emptyRx').classList.toggle('hidden', list.length > 0);
+  document.getElementById('rxList').innerHTML = list.map(rx => `
+    <div class="card">
+      <div class="flex-between">
+        <div><strong>${formatDate(rx.prescription_date)}</strong> — ${escapeHtml(rx.diagnosis||'')}</div>
+        <button class="btn btn-danger btn-sm" onclick="deleteRx('${rx.id}')" data-i18n="delete">حذف</button>
+      </div>
+      <div class="table-wrap" style="margin-top:10px;">
+        <table><thead><tr>
+          <th data-i18n="medication">الدواء</th><th data-i18n="dosage">الجرعة</th><th data-i18n="frequency">التكرار</th><th data-i18n="duration">المدة</th>
+        </tr></thead><tbody>
+          ${(rx.prescription_items||[]).map(it => `<tr><td>${escapeHtml(it.medication_name)}</td><td>${escapeHtml(it.dosage||'—')}</td><td>${escapeHtml(it.frequency||'—')}</td><td>${escapeHtml(it.duration||'—')}</td></tr>`).join('')}
+        </tbody></table>
+      </div>
+      ${rx.notes ? `<p class="muted" style="margin-top:8px;">${escapeHtml(rx.notes)}</p>` : ''}
+    </div>`).join('');
+  applyLang();
+}
+async function deleteRx(id) {
+  if (!confirm(t('delete') + '?')) return;
+  await supabase.from('prescriptions').delete().eq('id', id);
+  showToast(t('deleted_successfully')); loadPrescriptions();
+}
+let rxLineCount = 0;
+function rxLineHtml(n) {
+  return `<div class="field-row rx-line" data-n="${n}" style="align-items:flex-end;">
+    <div class="field"><label data-i18n="medication">الدواء</label><input type="text" class="rxMed" required></div>
+    <div class="field"><label data-i18n="dosage">الجرعة</label><input type="text" class="rxDose"></div>
+    <div class="field"><label data-i18n="frequency">التكرار</label><input type="text" class="rxFreq"></div>
+    <div class="field"><label data-i18n="duration">المدة</label><input type="text" class="rxDur"></div>
+  </div>`;
+}
+document.getElementById('addRxBtn').addEventListener('click', () => {
+  rxLineCount = 1;
+  openModal(`
+    <h3 data-i18n="new_prescription">وصفة جديدة</h3>
+    <form id="rxForm">
+      <div class="field"><label data-i18n="diagnosis">التشخيص</label><input type="text" id="rxDiagnosis"></div>
+      <div id="rxLines">${rxLineHtml(1)}</div>
+      <button type="button" class="btn btn-ghost btn-sm" id="addLineBtn" style="margin:8px 0;">+ <span data-i18n="add_medication_line">إضافة سطر دواء</span></button>
+      <div class="field"><label data-i18n="notes">ملاحظات</label><textarea id="rxNotes" rows="2"></textarea></div>
+      <div class="flex gap-12" style="justify-content:flex-end; margin-top:10px;">
+        <button type="button" class="btn btn-ghost" onclick="closeModal()" data-i18n="cancel">إلغاء</button>
+        <button type="submit" class="btn btn-primary" data-i18n="save">حفظ</button>
+      </div>
+    </form>`);
+  document.getElementById('addLineBtn').addEventListener('click', () => {
+    rxLineCount++;
+    document.getElementById('rxLines').insertAdjacentHTML('beforeend', rxLineHtml(rxLineCount));
+    applyLang();
+  });
+  document.getElementById('rxForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const { data: rx, error } = await supabase.from('prescriptions').insert({
+      patient_id: patientId, doctor_id: doctorId,
+      diagnosis: document.getElementById('rxDiagnosis').value.trim(),
+      notes: document.getElementById('rxNotes').value.trim()
+    }).select().single();
+    if (error) { showToast(error.message, 'error'); return; }
+    const items = Array.from(document.querySelectorAll('.rx-line')).map(line => ({
+      prescription_id: rx.id,
+      medication_name: line.querySelector('.rxMed').value.trim(),
+      dosage: line.querySelector('.rxDose').value.trim(),
+      frequency: line.querySelector('.rxFreq').value.trim(),
+      duration: line.querySelector('.rxDur').value.trim(),
+    })).filter(it => it.medication_name);
+    if (items.length) await supabase.from('prescription_items').insert(items);
+    showToast(t('saved_successfully')); closeModal(); loadPrescriptions();
+  });
+});
+
+(async function () {
+  const profile = await requireRole('doctor');
+  if (!profile) return;
+  doctorId = profile.id;
+  renderSidebar('patients', profile);
+  document.getElementById('userName').textContent = profile.full_name;
+  document.getElementById('avatarLetter').textContent = (profile.full_name || '?').trim()[0];
+
+  if (!patientId) { window.location.href = 'patients.html'; return; }
+  const { data: p, error } = await supabase.from('patients').select('*').eq('id', patientId).single();
+  if (error || !p) { showToast(t('error_occurred'), 'error'); window.location.href = 'patients.html'; return; }
+  currentPatient = p;
+  document.getElementById('patientName').textContent = p.full_name;
+  document.getElementById('patientSub').textContent = `${p.gender ? t(p.gender) : ''} · ${calcAge(p.birth_date)}`;
+  renderOverview(p);
+  loadAppointments(); loadLabs(); loadPrescriptions();
+})();
+</script>
+</body>
+</html>
